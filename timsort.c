@@ -5,19 +5,28 @@
 // Merge the sorted arrays p1, p2 of length l1, l2 into a single
 // sorted array starting at target. target may overlap with either
 // of p1 or p2 but must have enough space to store the array.
-void merge(int target[], int p1[], int l1, int p2[], int l2);
+// Use the storage argument for temporary storage. It must have room for
+// l1 + l2 ints.
+void merge(int target[], int p1[], int l1, int p2[], int l2, int storage[]);
+void integer_timsort_with_storage(int array[], int size, int storage[]);
 
 void integer_timsort(int array[], int size){
+  int *storage = malloc(sizeof(int) * size);
+  integer_timsort_with_storage(array, size, storage);
+  free(storage); 
+}
+
+void integer_timsort_with_storage(int array[], int size, int storage[]){
   if(size <= 1) return; 
   
   int partition = size/2;
-  integer_timsort(array, partition);
-  integer_timsort(array + partition, size - partition);
-  merge(array, array, partition, array + partition, size - partition); 
+  integer_timsort_with_storage(array, partition, storage);
+  integer_timsort_with_storage(array + partition, size - partition, storage);
+  merge(array, array, partition, array + partition, size - partition, storage); 
 }
 
-void merge(int target[], int p1[], int l1, int p2[], int l2){
-  int *merge_to = malloc(sizeof(int) * (l1 + l2)); 
+void merge(int target[], int p1[], int l1, int p2[], int l2, int storage[]){
+  int *merge_to = storage; 
  
   // Current index into each of the two arrays we're writing 
   // from. 
@@ -52,6 +61,4 @@ void merge(int target[], int p1[], int l1, int p2[], int l2){
   // We've now merged into our additional working space. Time
   // to copy to the target. 
   memcpy(target, merge_to, sizeof(int) * (l1 + l2));
- 
-  free(merge_to);
 }
