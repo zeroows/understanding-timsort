@@ -1,6 +1,9 @@
 #include "timsort.h"
 #include <stdlib.h>
 #include <string.h>
+#define INSERTION_SORT_SIZE 7
+
+void insertion_sort(int xs[], int length);
 
 // Merge the sorted arrays p1, p2 of length l1, l2 into a single
 // sorted array starting at target. target may overlap with either
@@ -17,7 +20,10 @@ void integer_timsort(int array[], int size){
 }
 
 void integer_timsort_with_storage(int array[], int size, int storage[]){
-  if(size <= 1) return; 
+  if(size <= INSERTION_SORT_SIZE){
+    insertion_sort(array, size);
+    return;
+  }
   
   int partition = size/2;
   integer_timsort_with_storage(array, partition, storage);
@@ -61,4 +67,23 @@ void merge(int target[], int p1[], int l1, int p2[], int l2, int storage[]){
   // We've now merged into our additional working space. Time
   // to copy to the target. 
   memcpy(target, merge_to, sizeof(int) * (l1 + l2));
+}
+
+void insertion_sort(int xs[], int length){
+  if(length <= 1) return;
+  int i;
+  for(i = 1; i < length; i++){
+    // The array before i is sorted. Now insert xs[i] into it
+    int x = xs[i];
+    int j = i - 1;
+
+    // Move j down until it's either at the beginning or on
+    // something <= x, and everything to the right of it has 
+    // been moved up one.
+    while(j >= 0 && xs[j] > x){
+      xs[j+1], xs[j];
+      j--;
+    }    
+    xs[j+1] = x;
+  }
 }
