@@ -3,6 +3,24 @@
 #include <string.h>
 #define INSERTION_SORT_SIZE 7
 
+// We use a fixed size stack. This size is far larger than there is
+// any reasonable expectation of overflowing. Of course, we do still
+// need to check for overflows.
+#define STACK_SIZE 1024
+
+typedef struct {
+  int index;
+  int length;
+} run;
+
+typedef struct {
+  int *storage;
+  int stack_height;
+  int run[STACK_SIZE];
+} sort_state_struct;
+
+typedef sort_state_struct *sort_state;
+
 void insertion_sort(int xs[], int length);
 
 // Merge the sorted arrays p1, p2 of length l1, l2 into a single
@@ -11,24 +29,26 @@ void insertion_sort(int xs[], int length);
 // Use the storage argument for temporary storage. It must have room for
 // l1 + l2 ints.
 void merge(int target[], int p1[], int l1, int p2[], int l2, int storage[]);
-void integer_timsort_with_storage(int array[], int size, int storage[]);
+void integer_timsort_with_storage(int array[], int size, sort_state state);
 
 void integer_timsort(int array[], int size){
-  int *storage = malloc(sizeof(int) * size);
-  integer_timsort_with_storage(array, size, storage);
-  free(storage); 
+  sort_state_struct sort_state;
+  sort_state.storage = malloc(sizeof(int) * size);
+  sort_state.stack_height = 0;
+  integer_timsort_with_storage(array, size, &sort_state);
+  free(sort_state.storage); 
 }
 
-void integer_timsort_with_storage(int array[], int size, int storage[]){
+void integer_timsort_with_storage(int array[], int size, sort_state state){
   if(size <= INSERTION_SORT_SIZE){
     insertion_sort(array, size);
     return;
   }
   
   int partition = size/2;
-  integer_timsort_with_storage(array, partition, storage);
-  integer_timsort_with_storage(array + partition, size - partition, storage);
-  merge(array, array, partition, array + partition, size - partition, storage); 
+  integer_timsort_with_storage(array, partition, state);
+  integer_timsort_with_storage(array + partition, size - partition, state);
+  merge(array, array, partition, array + partition, size - partition, state->storage); 
 }
 
 void merge(int target[], int p1[], int l1, int p2[], int l2, int storage[]){
