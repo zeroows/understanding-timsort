@@ -1,0 +1,422 @@
+Python's timsort has a reputation for being rather scary. This is understandable, as there are a lot of bits to it. However, really when you come down to it it's "just" a pile of variations applied to mergesort. Some of these variations are rather clever, some of them are pretty straightforward, but together they result in something really quite impressive.
+
+I'm going to show you through worked examples how you might arrive at timsort starting from a basic mergesort. In this article I'll cover how to arrive at a basic adaptive mergesort that represents the "core" of timsort. Later articles will build on this to cover more of the specific optimisations it uses. 
+
+For the sake of simplicity I'm not going to worry about the general case, but am going to stick to arrays of integers (it's easy to generalise once you have this, it just makes the code easier to follow). Also, this is necessarily a summary, so I will probably gloss over details (or may just have some things plain wrong), so naturally you should always refer to <a href="http://svn.python.org/projects/python/trunk/Objects/listsort.txt">Tim Peters's description of the algorithm</a> if you want the specific details.
+
+Oh, and the example code is going to be in C. Sorry.
+
+So, we'll start with a really naive implementation of mergesort.
+
+Hopefully you already know how mergesort works (if not, you might want to refer elsewhere to find out), but here's a refresher: Arrays of length 1 are already sorted. For arrays of length n > 1 partition the array into two (the most common approach is to split it down the middle). Mergesort the two partitions. Now apply a merge operation, which takes two sorted arrays and merges them together to form a larger sorted array by scanning through them and always writing the smallest one as the next element, to get the larger array sorted.
+
+Here's some code: 
+
+<pre>
+#include "timsort.h"
+#include <stdlib.h>
+#include <string.h>
+
+// Merge the sorted arrays p1, p2 of length l1, l2 into a single
+// sorted array starting at target. target may overlap with either
+// of p1 or p2 but must have enough space to store the array.
+void merge(int target[], int p1[], int l1, int p2[], int l2);
+
+void integer_timsort(int array[], int size){
+  if(size <= 1) return; 
+  
+  int partition = size/2;
+  integer_timsort(array, partition);
+  integer_timsort(array + partition, size - partition);
+  merge(array, array, partition, array + partition, size - partition); 
+}
+
+void merge(int target[], int p1[], int l1, int p2[], int l2){
+  int *merge_to = malloc(sizeof(int) * (l1 + l2)); 
+ 
+  // Current index into each of the two arrays we're writing 
+  // from. 
+  int i1, i2;
+  i1 = i2 = 0; 
+ 
+  // The address to which we write the next element in the merge
+  int *next_merge_element = merge_to;
+
+  // Iterate over the two arrays, writing the least element at the
+  // current position to merge_to. When the two are equal we prefer
+  // the left one, because if we're merging left, right we want to
+  // ensure stability.
+  // Of course this doesn't matter for integers, but it's the thought
+  // that counts. 
+  while(i1 < l1 && i2 < l2){
+    if(p1[i1] <= p2[i2]){
+      *next_merge_element = p1[i1];
+      i1++;
+    } else {
+      *next_merge_element = p2[i2];
+      i2++;
+    }
+    next_merge_element++;
+  }
+
+  // If we stopped short before the end of one of the arrays
+  // we now copy the rest over.
+  memcpy(next_merge_element, p1 + i1, sizeof(int) * (l1 - i1)); 
+  memcpy(next_merge_element, p2 + i2, sizeof(int) * (l2 - i2)); 
+
+  // We've now merged into our additional working space. Time
+  // to copy to the target. 
+  memcpy(target, merge_to, sizeof(int) * (l1 + l2));
+ 
+  free(merge_to);
+}
+</pre>
+
+I won't always paste the full code. You can follow these along as revisions in <a href="http://github.com/DRMacIver/understanding-timsort">the github repo</a>.
+
+Now, if you're a C programmer one thing probably leapt out at you as a horrible abomination: We're allocating and freeing space for the merge with every merge call (you may also be grumpy that we're not checking for null returns. Pretend that I would if this were real code rather than demo if that makes you feel better).
+
+This is easy to fix with a few signature changes and a wrapper:
+
+<pre>
+void merge(int target[], int p1[], int l1, int p2[], int l2, int storage[]);
+void integer_timsort_with_storage(int array[], int size, int storage[]);
+
+void integer_timsort(int array[], int size){
+  int *storage = malloc(sizeof(int) * size);
+  integer_timsort_with_storage(array, size, storage);
+  free(storage); 
+}
+</pre>
+
+So we have a top level sort function which does some setup and then passes to the recursive version. This is a pattern we'll take a lot of advantage for for timsort, though what is passed in to the worker version will end up being more complicated than just a flat block of storage.
+
+So, we have our basic mergesort. We need to ask: How can we optimise this?
+
+In general we can't expect to optimise it to get a win in every case. Mergesort's behaviour is very close to optimal for a comparison sort. The key feature of timsort is that it is optimised to exploit certain common sorts of regularity in data. When they are there, we should take advantage of them as much as possible. When they are not we should merely be not substantially worse than a normal mergesort.
+
+If you look at the mergesort implementation, essentially all the work is done by the merge operation. So optimising basically comes down to that. This suggests three optimisation approaches:
+
+<ol>
+  <li>Can we make merges faster?</li>
+  <li>Can we perform fewer merges?</li>
+  <li>Are there cases where we're actually better off doing something different and not using mergesort?</li>
+</ol>
+
+The answer to three is unequivocally yes, and this is a very common source of merge sort optimisations. For example, the recursive implementation makes it very easy to switch to different sorting algorithms based on the size of the array. Mergesort is a very good general purpose sorting algorithm, but for small arrays the constant factors tend to dominate. Frequently one drops down to insertion sort for arrays under some size (around 7 or 8 seems to be a common choice).
+
+This isn't actually how timsort works, but we will need insertion sort later, so I'll take a quick digression down this route.
+
+Basically: Suppose we have a sorted array of n elements, with space for an n+1th at the end, and we want to add a single element to it in such a way that the end result is sorted. We need to find the appropriate place for it and move the elements larger than that up. One obvious way to do this is to insert the element into the n+1th slot and then swap backwards until it's in the right place (for large arrays this isn't neccessarily the best bet: You might want to binary search and then move the rest of the array up without doing comparisons. For small arrays however this is likely to lose due to cache effects). 
+
+This is how insertion sort works: You have the first k elements sorted. You insert the k+1th element into these k sorted elements as above, so now you have k+1 elements sorted. Proceed until you hit the end of the array.
+
+Here's some code:
+
+<pre>
+void insertion_sort(int xs[], int length){
+  if(length <= 1) return;
+  int i;
+  for(i = 1; i < length; i++){
+    // The array before i is sorted. Now insert xs[i] into it
+    int x = xs[i];
+    int j = i - 1;
+
+    // Move j down until it's either at the beginning or on
+    // something <= x, and everything to the right of it has 
+    // been moved up one.
+    while(j >= 0 && xs[j] > x){
+      xs[j+1], xs[j];
+      j--;
+    }    
+    xs[j+1] = x;
+  }
+}
+</pre>
+
+And the sort code gets modified as follows:
+
+<pre>
+void integer_timsort_with_storage(int array[], int size, int storage[]){
+  if(size <= INSERTION_SORT_SIZE){
+    insertion_sort(array, size);
+    return;
+  }
+</pre>
+
+You can see this version <a href="http://github.com/DRMacIver/understanding-timsort/commit/57a91bd8c5383ffa1e0e5dc1df0849e16ec037bd">here</a>.
+
+Anyway, that digression aside, we return to our questions about optimisation.
+ 
+Can we perform fewer merges?
+
+Well, in general probably not. But let's consider a couple common cases.
+
+Suppose we have an array that's already sorted. How many merges do we need to perform?
+
+Well, in principle none: The array is already sorted. There's nothing to do. So one option would be to add an initial check to see if the array is already sorted and exit early there.
+
+But that adds a bunch of extra work to the sort. It wins big in the case where it succeeds (drops us down to O(n) instead of O(n log(n)) with a worse contant factor), but adds a bunch of useless extra work in the case where it fails. So let's try and figure out how we can perform this check and make use of the results even when it doesn't succeed.
+
+Suppose we've got the following array:
+
+<pre>
+{5, 6, 7, 8, 9, 10, 1, 2, 3}
+</pre>
+
+(ignoring for the moment the fact that we want to use a different sort for smaller n).
+
+Where do we want to partition in order to get the best merge?
+
+Clearly there are two already sorted subarrays: 5 to 10 and then 1 to 3. It would be nice to be able to choose them as our partitions. 
+
+Let me propose a broken solution: 
+
+Find the longest initial increasing sequence. Choose that as the first partition, and the rest of the array as the second partition. 
+
+In the case where the array is partitioned into a small number of sorted arrays, this works pretty well (actually even then it's not a great idea), but it has pretty awful worst case behaviour. Consider what happens if we have an array in reverse order. The first sorted subarray on each partition will have length 1. So at each stage we'll have only one element in the first partition, and then recursively perform the merge sort on n - 1 elements. This gives us a most distinctly unsatisfying O(n^2) behaviour.
+
+We could fix this by artificially boosting short arrays to the first n / 2 elements, but this is unsatisfying: We're still most likely to ignore the extra work we're doing, and it's going to pay off very rarely. 
+
+However, the basic idea is sound: Use the already sorted subarrays as the basis of partitions for our merge. 
+
+The bad part is our choice of the second partition. We want to ensure that our merges are better balanced in order to ensure we don't hit pathological worst case behaviour.
+
+In order to see how to fix this, let's take a step back. Consider the following slightly strange inversion of how a standard merge sort works:
+
+Partition the array into sections of length 1.
+
+While there is more than one partition, merge alternating even/odd partitions and replace them with a single partition.
+
+so e.g. if we had the array {1, 2, 3, 4} then this would go:
+
+<pre>
+{{1}, {2}, {3}, {4}}
+{{1, 2}, {3, 4}}
+{{1, 2, 3, 4}}
+</pre>
+
+It's relatively easy to see that this is "the same" as the standard mergesort: We've just turned it inside out by making the recursion explicit and using external storage instead of the stack. However, this approach is more suggestive of how we can use the existing sorted subarrays: We replace the first step by instead of partitioning the array into segments of length 1 we partition it into the already sorted segments. We then proceed with the merges as above.
+
+Now, there's just one small problem with this: We're using a pile of external storage that we didn't need to use. With the original mergesort we used O(log(n)) stack space. This version uses O(n) space to store the initial partitions.
+
+So, how is it that our "equivalent" algorithms have vastly different space usage? 
+
+Well, the answer is that I sortof lied about their equivalence. The big difference is that with the original mergesort the partition lists are generated lazily. We only ever generate as much as we need to produce the next level up and then discard it once we've produced the next level.
+
+Put another way, we're actually merging as we go rather than generating all the partitions up front. 
+
+So, let's see if we can convert that into an algorithm. 
+
+First pass: At each step, generate a new base level partition (in normal mergesort this is a single element. In our version proposed above this is a sorted subarray). Add it to a stack of already generated partitions. Possibly reduce the size of the stack by merging the top two elements some number of times. Repeat until there are no more partitions to generate. Collapse the entire stack by merging.
+
+There was one bit of fakery in there: We've left the logic for when to merge as we go completely unspecified. 
+
+At this point there's been far too much text and far too little code, so I'm going to propose a temporary answer: Pick it at random. In the normal merge sort about half of operations result in a merge. Half of the partitions generated are merged with the previous one, half of the merges at a given level are merged with the previous one, etc. So we'll simply flip a metaphorical coin as to whether or not we should merge.
+
+Now, let's write some code for this. 
+
+The first thing we do is encapsulate all the state we're going to be passing around:
+
+<pre>
+// We use a fixed size stack. This size is far larger than there is
+// any reasonable expectation of overflowing. Of course, we do still
+// need to check for overflows.
+#define STACK_SIZE 1024
+
+typedef struct {
+  int *index;
+  int length;
+} run;
+
+typedef struct {
+  int *storage;
+  // Storage for the stack of runs we've got so far.
+  run runs[STACK_SIZE];
+  // The index of the first unwritten element of the stack.
+  int stack_height;
+
+  // We keep track of how far we've partitioned up to so we know where to start the next partition. 
+  // The idea is that everything < partioned_up_to is on the stack, everything >= partioned_up_to 
+  // is not yet on the stack. When partitioned_up_to == length we'll have put everything on the stack.
+  int *partitioned_up_to;
+
+  int *array;
+  int length;
+
+} sort_state_struct;
+
+typedef sort_state_struct *sort_state;
+</pre>
+
+We'll pass around a pointer to the sort_state to all the functions we need.
+
+The basic logic of the sort is this:
+
+<pre>
+  while(next_partition(&state)){
+    while(should_collapse(&state)) merge_collapse(&state);
+  }
+
+  while(state.stack_height > 1) merge_collapse(&state);
+</pre>
+
+next_partition either pushes a new partition onto the stack and returns 1 or returns 0 if there are no more partitions to add (i.e. we're at the end of the array). We then collapse the stack a bit. Finally when the entire array is partitioned we collapse the stack to one element.
+
+We now have our first adaptive version of mergesort: If there are a lot of sorted subarrays we'll be able to get large shortcuts out of them. If not, we'll still run in (expected) O(n log(n)) time.
+
+That "expected" qualification is a bit of a wart though. The randomisation was clearly a quick hack to avoid us having to actually figure out good conditions to merge on.
+
+So, let's see if we can figure out a better condition. The natural way to do it is to try to maintain some invariant on the stack and merge until that invariant is satisfied.
+
+Further, we want that invariant to maintain the stack as having at most log(n) elements. 
+
+For now, let's consider the following invariant: Each element on the stack has to be >= twice the one popped right before it. So the head is the smallest, the next smallest is the previous and is at least twice as long as the head.
+
+This invariant certainly achieves the log(n) elements criterion. It does however have the tendency to create very long runs of collapses. Consider the case where the lengths of the stack look as follows:
+
+<pre>
+64, 32, 16, 8, 4, 2, 1
+</pre>
+
+Suppose we push a run of length 1 onto the stack. We start the following sequences of merges:
+
+<pre>
+64, 32, 16, 8, 4, 2, 1, 1
+64, 32, 16, 8, 4, 2, 2
+64, 32, 16, 8, 4, 4
+64, 32, 16, 8, 8
+64, 32, 16, 16
+64, 32, 32
+64, 64
+128
+</pre>
+
+Later on, as the merge gets smarter, this will prove to be a bad thing (basically because it stomps on certain structure that might be present in the array). However right now our merges are pretty dumb, so we don't need to worry about it. So we'll simply go with this for now.
+
+One thing worth noting: We now have deterministic guarantees over how big our stack can get. Suppose the first element of the stack is 1. Then the next is >= 2, the next is >= 4, etc. So the total length of segments on the stack is 2^n - 1. Since there can be at most 2^64 elements in the array on a 64-bit machine (and that would be a really alarmingly large array even there), we know that a stack satisfying this invariant can have at most 65 elements. Adding 1 more for the element being pushed, this means we can allocate 66 spaces for the stack and never worry about overflowing.
+
+It's also worth noting that we only need to check whether the element one off the head is >= 2 * the head, because we're always pushing onto a stack satisfying this invariant and a merge only affects the top two elements.
+
+So, in order to satisfy this invariant we simply change should_collapse as follows:
+
+<pre>
+ int should_collapse(sort_state state){
+  if (state->stack_height <= 2) return 0;
+  
+  int h = state->stack_height - 1;
+
+  int head_length = state->runs[h].length;
+  int next_length = state->runs[h-1].length;
+
+  return 2 * head_length > next_length;
+}
+</pre>
+
+So, our adaptive merge is now deterministic. Huzzah.
+
+Now, let's go back to our previous example of a case that was problematic and see what happens.
+
+Consider the following reversed array:
+
+<pre>
+5, 4, 3, 2, 1
+</pre>
+
+What happens when we apply our adaptive mergesort to it?
+
+Well, the stack of runs looks like this:
+
+<pre>
+{5}
+{5}, {4}
+{4, 5}
+{4, 5}, {3}
+{4, 5}, {3}, {2}
+{4, 5}, {2, 3}
+{2, 3, 4, 5}
+{2, 3, 4, 5}, {1}
+{1, 2, 3, 4, 5}
+</pre>
+
+Which is a sane enough merge strategy. 
+
+But you know what a nicer way to sort a reverse order array is? Reverse it in place and you're done.
+
+There's an obvious way to modify our algorithm to take advantage of this. We're already looking for increasing runs, we can simply look for a decreasing run when we don't find an increasing one, reverse it in place and add it as an increasing run. 
+
+So we modify the code for finding the next run as follows:
+
+<pre>
+  if(next_start_index < state->array + state->length){
+    if(*next_start_index < *start_index){
+      // We have a decreasing sequence starting here. 
+      while(next_start_index < state->array + state->length){
+        if(*next_start_index < *(next_start_index - 1)) next_start_index++;
+        else break;
+      }
+
+      // Now reverse it in place.
+      reverse(start_index, next_start_index - start_index);
+
+    } else {
+      // We have an increasing sequence starting here. 
+      while(next_start_index < state->array + state->length){
+        if(*next_start_index >= *(next_start_index - 1)) next_start_index++;
+        else break;
+      }
+    }
+  }
+</pre>
+
+As well as the basic case of a reversed array, the sort will now deal much better with things which "zig zag" up and down. e.g. consider sorting the following:
+
+<pre>
+{1, 2, 3, 4, 5, 4, 3, 2, 1}
+</pre>
+
+We get the following merges:
+
+<pre>
+{1, 2, 3, 4, 5}
+{1, 2, 3, 4, 5}, {1, 2, 3, 4}
+{1, 1, 2, 2, 3, 3, 4, 4, 5}
+</pre>
+
+Which is a lot better than we would have on the previous implementation!
+
+And for one final optimisation on the run generation:
+
+In our previous mergesort we had a cutoff size at which we switched to insertion sort for small arrays. There's currently no analogue of this for our adaptive version, which means that we will potentially underperform compared to normal mergesort when there isn't much structure to exploit.
+
+Looking back to our "inside out" mergesort, the process of switching to insertion sort for small runs can be viewed as follows: Rather than starting with runs of size 1, we start with runs of size INSERTION_SORT_SIZE, which we run insertion sort on to ensure that they are sorted.
+
+This suggests a natural adaption to our adaptive sort: When we find a run which is less than some minimum size, use insertion sort to boost it to a run of that size.
+
+This causes us to change the end of next_partition as follows:
+
+<pre>
+  if(run_to_add.length < MIN_RUN_SIZE){
+    boost_run_length(state, &run_to_add);
+  }
+  state->partitioned_up_to = start_index + run_to_add.length;
+</pre>
+
+Where boot_run_length is defined as:
+
+<pre>
+void boost_run_length(sort_state state, run *run){
+  // Need to make sure we don't overshoot the end of the array
+  int length = state->length - (run->index - state->array);
+  if(length > MIN_RUN_SIZE) length = MIN_RUN_SIZE;
+
+  insertion_sort(run->index, length);
+  run->length = length;
+}
+</pre>
+
+(It would make more sense to specialize this a bit, as we know that we have an initially sorted segment, but I'm being lazy).
+
+This should improve the behaviour on random data to a degree which is fairly competive with a normal merge sort.
+
+We now have an adaptive mergesort which is in some sense the "core" of timsort. Timsort adds a large number of optimisations on top of this, many of them integral to its success, but this is the starting point on which they're all based. I hope/plan to cover the rest in later articles.
