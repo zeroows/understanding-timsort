@@ -151,3 +151,65 @@ Can we perform fewer merges?
 Well, in general probably not. But let's consider a couple common cases.
 
 Suppose we have an array that's already sorted. How many merges do we need to perform?
+
+Well, in principle none: The array is already sorted. There's nothing to do. So one option would be to add an initial check to see if the array is already sorted and exit early there.
+
+But that adds a bunch of extra work to the sort. It wins big in the case where it succeeds (drops us down to O(n) instead of O(n log(n)) with a worse contant factor), but adds a bunch of useless extra work in the case where it fails. So let's try and figure out how we can perform this check and make use of the results even when it doesn't succeed.
+
+Suppose we've got the following array:
+
+<pre>
+{5, 6, 7, 8, 9, 10, 1, 2, 3}
+</pre>
+
+(ignoring for the moment the fact that we want to use a different sort for smaller n).
+
+Where do we want to partition in order to get the best merge?
+
+Clearly there are two already sorted subarrays: 5 to 10 and then 1 to 3. It would be nice to be able to choose them as our partitions. 
+
+Let me propose a broken solution: 
+
+Find the longest initial increasing sequence. Choose that as the first partition, and the rest of the array as the second partition. 
+
+In the case where the array is partitioned into a small number of sorted arrays, this works pretty well (actually even then it's not a great idea), but it has pretty awful worst case behaviour. Consider what happens if we have an array in reverse order. The first sorted subarray on each partition will have length 1. So at each stage we'll have only one element in the first partition, and then recursively perform the merge sort on n - 1 elements. This gives us a most distinctly unsatisfying O(n^2) behaviour.
+
+We could fix this by artificially boosting short arrays to the first n / 2 elements, but this is unsatisfying: We're still most likely to ignore the extra work we're doing, and it's going to pay off very rarely. 
+
+However, the basic idea is sound: Use the already sorted subarrays as the basis of partitions for our merge. 
+
+The bad part is our choice of the second partition. We want to ensure that our merges are better balanced in order to ensure we don't hit pathological worst case behaviour.
+
+In order to see how to fix this, let's take a step back. Consider the following slightly strange inversion of how a standard merge sort works:
+
+Partition the array into sections of length 1.
+
+While there is more than one partition, merge alternating even/odd partitions and replace them with a single partition.
+
+so e.g. if we had the array {1, 2, 3, 4} then this would go:
+
+<pre>
+{{1}, {2}, {3}, {4}}
+{{1, 2}, {3, 4}}
+{{1, 2, 3, 4}}
+</pre>
+
+It's relatively easy to see that this is "the same" as the standard mergesort: We've just turned it inside out by making the recursion explicit and using external storage instead of the stack. However, this approach is more suggestive of how we can use the existing sorted subarrays: We replace the first step by instead of partitioning the array into segments of length 1 we partition it into the already sorted segments. We then proceed with the merges as above.
+
+Now, there's just one small problem with this: We're using a pile of external storage that we didn't need to use. With the original mergesort we used O(log(n)) stack space. This version uses O(n) space to store the initial partitions.
+
+So, how is it that our "equivalent" algorithms have vastly different space usage? 
+
+Well, the answer is that I sortof lied about their equivalence. The big difference is that with the original mergesort the partition lists are generated lazily. We only ever generate as much as we need to produce the next level up and then discard it once we've produced the next level.
+
+Put another way, we're actually merging as we go rather than generating all the partitions up front. 
+
+So, let's see if we can convert that into an algorithm. 
+
+First pass: At each step, generate a new base level partition (in normal mergesort this is a single element. In our version proposed above this is a sorted subarray). Add it to a stack of already generated partitions. Possibly reduce the size of the stack by merging the top two elements some number of times. Repeat until there are no more partitions to generate. Collapse the entire stack by merging.
+
+There was one bit of fakery in there: We've left the logic for when to merge as we go completely unspecified. 
+
+At this point there's been far too much text and far too little code, so I'm going to propose a temporary answer: Pick it at random. In the normal merge sort about half of operations result in a merge. Half of the partitions generated are merged with the previous one, half of the merges at a given level are merged with the previous one, etc. So we'll simply flip a metaphorical coin as to whether or not we should merge.
+
+Now, let's write some code for this.  
