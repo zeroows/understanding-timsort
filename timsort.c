@@ -9,17 +9,30 @@
 #define STACK_SIZE 1024
 
 typedef struct {
-  int index;
+  int *index;
   int length;
 } run;
 
 typedef struct {
   int *storage;
+  // Storage for the stack of runs we've got so far.
+  run runs[STACK_SIZE];
+  // The index of the first unwritten element of the stack.
   int stack_height;
-  int run[STACK_SIZE];
+
+  // We keep track of how far we've partitioned up to so we know where to start the next partition. 
+  // The idea is that everything < partioned_up_to is on the stack, everything >= partioned_up_to 
+  // is not yet on the stack. When partitioned_up_to == length we'll have put everything on the stack.
+  int *partitioned_up_to;
+
+  int *array;
+  int length;
+
 } sort_state_struct;
 
 typedef sort_state_struct *sort_state;
+
+void integer_timsort_with_state(int array[], int size, sort_state state);
 
 void insertion_sort(int xs[], int length);
 
@@ -29,26 +42,68 @@ void insertion_sort(int xs[], int length);
 // Use the storage argument for temporary storage. It must have room for
 // l1 + l2 ints.
 void merge(int target[], int p1[], int l1, int p2[], int l2, int storage[]);
-void integer_timsort_with_storage(int array[], int size, sort_state state);
+
+int next_partition(sort_state state);
+int should_collapse(sort_state state);
+void merge_collapse(sort_state state);
 
 void integer_timsort(int array[], int size){
-  sort_state_struct sort_state;
-  sort_state.storage = malloc(sizeof(int) * size);
-  sort_state.stack_height = 0;
-  integer_timsort_with_storage(array, size, &sort_state);
-  free(sort_state.storage); 
+  sort_state_struct state;
+  state.storage = malloc(sizeof(int) * size);
+  state.stack_height = 0;
+  state.partitioned_up_to = array;
+  state.array = array;
+  state.length = size; 
+
+  while(next_partition(&state)){
+    while(should_collapse(&state)) merge_collapse(&state);
+  }
+
+  while(state.stack_height > 1) merge_collapse(&state);
+
+  free(state.storage); 
 }
 
-void integer_timsort_with_storage(int array[], int size, sort_state state){
-  if(size <= INSERTION_SORT_SIZE){
-    insertion_sort(array, size);
-    return;
-  }
+int next_partition(sort_state state){
+  if(state->partitioned_up_to >= state->array + state->length) return 0;
+ 
+  int *start_index = state->partitioned_up_to;
   
-  int partition = size/2;
-  integer_timsort_with_storage(array, partition, state);
-  integer_timsort_with_storage(array + partition, size - partition, state);
-  merge(array, array, partition, array + partition, size - partition, state->storage); 
+  // Find an increasing run starting from start_index
+
+  int *next_start_index = start_index + 1;
+
+  while(next_start_index < state->array + state->length){
+    if(*next_start_index >= *(next_start_index - 1)) next_start_index++;
+    else break;
+  }
+ 
+  // So now [start_index, next_start_index) is an increasing run. Push it onto the stack.
+
+  run run_to_add;
+  run_to_add.index = start_index;
+  run_to_add.length = (next_start_index - start_index);
+  state->runs[state->stack_height] = run_to_add;
+
+  state->stack_height++;
+  state->partitioned_up_to = next_start_index;
+
+  return 1;
+}
+
+int should_collapse(sort_state state){
+  return (state->stack_height > 2) && ((state->stack_height >= STACK_SIZE) || (rand() % 2));
+}
+
+void merge_collapse(sort_state state){
+  run A = state->runs[state->stack_height - 2];
+  run B = state->runs[state->stack_height - 1];
+
+  merge(A.index, A.index, A.length, B.index, B.length, state->storage);
+
+  state->stack_height--;
+  A.length += B.length;
+  state->runs[state->stack_height - 1] = A;
 }
 
 void merge(int target[], int p1[], int l1, int p2[], int l2, int storage[]){
