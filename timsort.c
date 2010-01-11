@@ -1,11 +1,10 @@
 #include "timsort.h"
 #include <stdlib.h>
 #include <string.h>
-#define INSERTION_SORT_SIZE 7
+#define MIN_RUN_SIZE 7
 
-// We use a fixed size stack. This size is far larger than there is
-// any reasonable expectation of overflowing. Of course, we do still
-// need to check for overflows.
+// We use a fixed size stack. This size is larger 
+// than can be overflowed on a 64-bit machine 
 #define STACK_SIZE 66
 
 typedef struct {
@@ -77,6 +76,15 @@ void reverse(int array[], int length){
   }
 }
 
+void boost_run_length(sort_state state, run *run){
+  // Need to make sure we don't overshoot the end of the array
+  int length = state->length - (run->index - state->array);
+  if(length > MIN_RUN_SIZE) length = MIN_RUN_SIZE;
+
+  insertion_sort(run->index, length);
+  run->length = length;
+}
+
 int next_partition(sort_state state){
   if(state->partitioned_up_to >= state->array + state->length) return 0;
  
@@ -111,10 +119,15 @@ int next_partition(sort_state state){
   run run_to_add;
   run_to_add.index = start_index;
   run_to_add.length = (next_start_index - start_index);
+
+  if(run_to_add.length < MIN_RUN_SIZE){
+    boost_run_length(state, &run_to_add);
+  }
+  state->partitioned_up_to = start_index + run_to_add.length;
+
   state->runs[state->stack_height] = run_to_add;
 
   state->stack_height++;
-  state->partitioned_up_to = next_start_index;
 
   return 1;
 }
@@ -177,4 +190,23 @@ void merge(int target[], int p1[], int l1, int p2[], int l2, int storage[]){
   // We've now merged into our additional working space. Time
   // to copy to the target. 
   memcpy(target, merge_to, sizeof(int) * (l1 + l2));
+}
+
+void insertion_sort(int xs[], int length){
+  if(length <= 1) return;
+  int i;
+  for(i = 1; i < length; i++){
+    // The array before i is sorted. Now insert xs[i] into it
+    int x = xs[i];
+    int j = i - 1;
+
+    // Move j down until it's either at the beginning or on
+    // something <= x, and everything to the right of it has 
+    // been moved up one.
+    while(j >= 0 && xs[j] > x){
+      xs[j+1] = xs[j];
+      j--;
+    }    
+    xs[j+1] = x;
+  }
 }

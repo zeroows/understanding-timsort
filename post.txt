@@ -1,6 +1,8 @@
 Python's timsort has a reputation for being rather scary. This is understandable, as there are a lot of bits to it. However, really when you come down to it it's "just" a pile of variations applied to mergesort. Some of these variations are rather clever, some of them are pretty straightforward, but together they result in something really quite impressive.
 
-I'm going to show you through worked examples how you might arrive at timsort starting from a basic mergesort. For the sake of simplicity I'm not going to worry about the general case, but am going to stick to arrays of integers (it's easy to generalise once you have this, it just makes the code easier to follow). Also, this is necessarily a summary, so I will probably gloss over details (or may just have some things plain wrong), so naturally you should always refer to <a href="http://svn.python.org/projects/python/trunk/Objects/listsort.txt">Tim Peters's description of the algorithm</a> if you want the specific details.
+I'm going to show you through worked examples how you might arrive at timsort starting from a basic mergesort. In this article I'll cover how to arrive at a basic adaptive mergesort that represents the "core" of timsort. Later articles will build on this to cover more of the specific optimisations it uses. 
+
+For the sake of simplicity I'm not going to worry about the general case, but am going to stick to arrays of integers (it's easy to generalise once you have this, it just makes the code easier to follow). Also, this is necessarily a summary, so I will probably gloss over details (or may just have some things plain wrong), so naturally you should always refer to <a href="http://svn.python.org/projects/python/trunk/Objects/listsort.txt">Tim Peters's description of the algorithm</a> if you want the specific details.
 
 Oh, and the example code is going to be in C. Sorry.
 
@@ -383,4 +385,38 @@ We get the following merges:
 
 Which is a lot better than we would have on the previous implementation!
 
-This gives us an adaptive mergesort which is in some sense the "core" of timsort. Timsort adds a large number of optimisations on top of this, many of them integral to its success, but this is the starting point on which they're all based. I hope/plan to cover the rest in later articles.
+And for one final optimisation on the run generation:
+
+In our previous mergesort we had a cutoff size at which we switched to insertion sort for small arrays. There's currently no analogue of this for our adaptive version, which means that we will potentially underperform compared to normal mergesort when there isn't much structure to exploit.
+
+Looking back to our "inside out" mergesort, the process of switching to insertion sort for small runs can be viewed as follows: Rather than starting with runs of size 1, we start with runs of size INSERTION_SORT_SIZE, which we run insertion sort on to ensure that they are sorted.
+
+This suggests a natural adaption to our adaptive sort: When we find a run which is less than some minimum size, use insertion sort to boost it to a run of that size.
+
+This causes us to change the end of next_partition as follows:
+
+<pre>
+  if(run_to_add.length < MIN_RUN_SIZE){
+    boost_run_length(state, &run_to_add);
+  }
+  state->partitioned_up_to = start_index + run_to_add.length;
+</pre>
+
+Where boot_run_length is defined as:
+
+<pre>
+void boost_run_length(sort_state state, run *run){
+  // Need to make sure we don't overshoot the end of the array
+  int length = state->length - (run->index - state->array);
+  if(length > MIN_RUN_SIZE) length = MIN_RUN_SIZE;
+
+  insertion_sort(run->index, length);
+  run->length = length;
+}
+</pre>
+
+(It would make more sense to specialize this a bit, as we know that we have an initially sorted segment, but I'm being lazy).
+
+This should improve the behaviour on random data to a degree which is fairly competive with a normal merge sort.
+
+We now have an adaptive mergesort which is in some sense the "core" of timsort. Timsort adds a large number of optimisations on top of this, many of them integral to its success, but this is the starting point on which they're all based. I hope/plan to cover the rest in later articles.
