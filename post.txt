@@ -145,68 +145,6 @@ void integer_timsort_with_storage(int array[], int size, int storage[]){
 You can see this version <a href="http://github.com/DRMacIver/understanding-timsort/commit/57a91bd8c5383ffa1e0e5dc1df0849e16ec037bd">here</a>.
 
 Anyway, that digression aside, we return to our questions about optimisation.
-
-Can we make merges faster?
-
-Yes, absolutely. 
-
-There are a variety of optimisations we can perform to merges. For now we'll concentrate on the one that is always a win. Currently merging two partitions of length A and B takes O(A + B) time and space. We'll make it run in O(Min(A, B)) space, thus performing a lot less copying. This is vital for the rest of what follows.
-
-Let's see what's wrong with the existing merge implementation:
-
-<pre>
-void merge(int target[], int p1[], int l1, int p2[], int l2, int storage[]){
-  int *merge_to = storage; 
- 
-  // Current index into each of the two arrays we're writing 
-  // from. 
-  int i1, i2;
-  i1 = i2 = 0; 
- 
-  // The address to which we write the next element in the merge
-  int *next_merge_element = merge_to;
-
-  // Iterate over the two arrays, writing the least element at the
-  // current position to merge_to. When the two are equal we prefer
-  // the left one, because if we're merging left, right we want to
-  // ensure stability.
-  // Of course this doesn't matter for integers, but it's the thought
-  // that counts. 
-  while(i1 < l1 && i2 < l2){
-    if(p1[i1] <= p2[i2]){
-      *next_merge_element = p1[i1];
-      i1++;
-    } else {
-      *next_merge_element = p2[i2];
-      i2++;
-    }
-    next_merge_element++;
-  }
-
-  // If we stopped short before the end of one of the arrays
-  // we now copy the rest over.
-  memcpy(next_merge_element, p1 + i1, sizeof(int) * (l1 - i1)); 
-  memcpy(next_merge_element, p2 + i2, sizeof(int) * (l2 - i2)); 
-
-  // We've now merged into our additional working space. Time
-  // to copy to the target. 
-  memcpy(target, merge_to, sizeof(int) * (l1 + l2));
-}
-</pre>
-
-Hmm. So we copy everything to a temporary array, then copy it back? That's a lot of copying just to have the data end up in more or less the same place it was already in. 
-
-Let's imagine we replaced the merge_to = storage with merge_to = target. What would happen? Well, obviously we'd write over the data we were trying to merge. 
-
-So what we want to try to do is move enough of the data out of the way to avoid overwriting it while leave the rest in place. How much do we need to move?
-
-Suppose we move the left hand partition out of the way. Is that enough? 
-
-It turns out that it is. Suppose A is size of the left partition, B is the size of the right partition, and that we've merged a elements from A and b from B. Then we have written a + b elements
-
-Let's see some code for this:
-
-
  
 Can we perform fewer merges?
 
