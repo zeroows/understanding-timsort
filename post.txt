@@ -212,4 +212,53 @@ There was one bit of fakery in there: We've left the logic for when to merge as 
 
 At this point there's been far too much text and far too little code, so I'm going to propose a temporary answer: Pick it at random. In the normal merge sort about half of operations result in a merge. Half of the partitions generated are merged with the previous one, half of the merges at a given level are merged with the previous one, etc. So we'll simply flip a metaphorical coin as to whether or not we should merge.
 
-Now, let's write some code for this.  
+Now, let's write some code for this. 
+
+The first thing we do is encapsulate all the state we're going to be passing around:
+
+<pre>
+// We use a fixed size stack. This size is far larger than there is
+// any reasonable expectation of overflowing. Of course, we do still
+// need to check for overflows.
+#define STACK_SIZE 1024
+
+typedef struct {
+  int *index;
+  int length;
+} run;
+
+typedef struct {
+  int *storage;
+  // Storage for the stack of runs we've got so far.
+  run runs[STACK_SIZE];
+  // The index of the first unwritten element of the stack.
+  int stack_height;
+
+  // We keep track of how far we've partitioned up to so we know where to start the next partition. 
+  // The idea is that everything < partioned_up_to is on the stack, everything >= partioned_up_to 
+  // is not yet on the stack. When partitioned_up_to == length we'll have put everything on the stack.
+  int *partitioned_up_to;
+
+  int *array;
+  int length;
+
+} sort_state_struct;
+
+typedef sort_state_struct *sort_state;
+</pre>
+
+We'll pass around a pointer to the sort_state to all the functions we need.
+
+The basic logic of the sort is this:
+
+<pre>
+  while(next_partition(&state)){
+    while(should_collapse(&state)) merge_collapse(&state);
+  }
+
+  while(state.stack_height > 1) merge_collapse(&state);
+</pre>
+
+next_partition either pushes a new partition onto the stack and returns 1 or returns 0 if there are no more partitions to add (i.e. we're at the end of the array). We then collapse the stack a bit. Finally when the entire array is partitioned we collapse the stack to one element.
+
+We now have our first adaptive version of mergesort: If there are a lot of sorted subarrays we'll be able to get large shortcuts out of them. If not, we'll still run in (expected) O(n log(n)) time.
