@@ -298,4 +298,89 @@ It's also worth noting that we only need to check whether the element one off th
 
 So, in order to satisfy this invariant we simply change should_collapse as follows:
 
+<pre>
+ int should_collapse(sort_state state){
+  if (state->stack_height <= 2) return 0;
   
+  int h = state->stack_height - 1;
+
+  int head_length = state->runs[h].length;
+  int next_length = state->runs[h-1].length;
+
+  return 2 * head_length > next_length;
+}
+</pre>
+
+So, our adaptive merge is now deterministic. Huzzah.
+
+Now, let's go back to our previous example of a case that was problematic and see what happens.
+
+Consider the following reversed array:
+
+<pre>
+5, 4, 3, 2, 1
+</pre>
+
+What happens when we apply our adaptive mergesort to it?
+
+Well, the stack of runs looks like this:
+
+<pre>
+{5}
+{5}, {4}
+{4, 5}
+{4, 5}, {3}
+{4, 5}, {3}, {2}
+{4, 5}, {2, 3}
+{2, 3, 4, 5}
+{2, 3, 4, 5}, {1}
+{1, 2, 3, 4, 5}
+</pre>
+
+Which is a sane enough merge strategy. 
+
+But you know what a nicer way to sort a reverse order array is? Reverse it in place and you're done.
+
+There's an obvious way to modify our algorithm to take advantage of this. We're already looking for increasing runs, we can simply look for a decreasing run when we don't find an increasing one, reverse it in place and add it as an increasing run. 
+
+So we modify the code for finding the next run as follows:
+
+<pre>
+  if(next_start_index < state->array + state->length){
+    if(*next_start_index < *start_index){
+      // We have a decreasing sequence starting here. 
+      while(next_start_index < state->array + state->length){
+        if(*next_start_index < *(next_start_index - 1)) next_start_index++;
+        else break;
+      }
+
+      // Now reverse it in place.
+      reverse(start_index, next_start_index - start_index);
+
+    } else {
+      // We have an increasing sequence starting here. 
+      while(next_start_index < state->array + state->length){
+        if(*next_start_index >= *(next_start_index - 1)) next_start_index++;
+        else break;
+      }
+    }
+  }
+</pre>
+
+As well as the basic case of a reversed array, the sort will now deal much better with things which "zig zag" up and down. e.g. consider sorting the following:
+
+<pre>
+{1, 2, 3, 4, 5, 4, 3, 2, 1}
+</pre>
+
+We get the following merges:
+
+<pre>
+{1, 2, 3, 4, 5}
+{1, 2, 3, 4, 5}, {1, 2, 3, 4}
+{1, 1, 2, 2, 3, 3, 4, 4, 5}
+</pre>
+
+Which is a lot better than we would have on the previous implementation!
+
+This gives us an adaptive mergesort which is in some sense the "core" of timsort. Timsort adds a large number of optimisations on top of this, many of them integral to its success, but this is the starting point on which they're all based. I hope/plan to cover the rest in later articles.

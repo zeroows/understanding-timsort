@@ -64,6 +64,19 @@ void integer_timsort(int array[], int size){
   free(state.storage); 
 }
 
+void reverse(int array[], int length){
+  int *start = array;
+  int *end = array + length - 1;
+
+  while(start < end){
+    int x = *start;
+    *start = *end;
+    *end = x;
+    start++;
+    end--;
+  }
+}
+
 int next_partition(sort_state state){
   if(state->partitioned_up_to >= state->array + state->length) return 0;
  
@@ -73,9 +86,24 @@ int next_partition(sort_state state){
 
   int *next_start_index = start_index + 1;
 
-  while(next_start_index < state->array + state->length){
-    if(*next_start_index >= *(next_start_index - 1)) next_start_index++;
-    else break;
+  if(next_start_index < state->array + state->length){
+    if(*next_start_index < *start_index){
+      // We have a decreasing sequence starting here. 
+      while(next_start_index < state->array + state->length){
+        if(*next_start_index < *(next_start_index - 1)) next_start_index++;
+        else break;
+      }
+
+      // Now reverse it in place.
+      reverse(start_index, next_start_index - start_index);
+
+    } else {
+      // We have an increasing sequence starting here. 
+      while(next_start_index < state->array + state->length){
+        if(*next_start_index >= *(next_start_index - 1)) next_start_index++;
+        else break;
+      }
+    }
   }
  
   // So now [start_index, next_start_index) is an increasing run. Push it onto the stack.
@@ -149,23 +177,4 @@ void merge(int target[], int p1[], int l1, int p2[], int l2, int storage[]){
   // We've now merged into our additional working space. Time
   // to copy to the target. 
   memcpy(target, merge_to, sizeof(int) * (l1 + l2));
-}
-
-void insertion_sort(int xs[], int length){
-  if(length <= 1) return;
-  int i;
-  for(i = 1; i < length; i++){
-    // The array before i is sorted. Now insert xs[i] into it
-    int x = xs[i];
-    int j = i - 1;
-
-    // Move j down until it's either at the beginning or on
-    // something <= x, and everything to the right of it has 
-    // been moved up one.
-    while(j >= 0 && xs[j] > x){
-      xs[j+1] = xs[j];
-      j--;
-    }    
-    xs[j+1] = x;
-  }
 }
