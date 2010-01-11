@@ -262,3 +262,40 @@ The basic logic of the sort is this:
 next_partition either pushes a new partition onto the stack and returns 1 or returns 0 if there are no more partitions to add (i.e. we're at the end of the array). We then collapse the stack a bit. Finally when the entire array is partitioned we collapse the stack to one element.
 
 We now have our first adaptive version of mergesort: If there are a lot of sorted subarrays we'll be able to get large shortcuts out of them. If not, we'll still run in (expected) O(n log(n)) time.
+
+That "expected" qualification is a bit of a wart though. The randomisation was clearly a quick hack to avoid us having to actually figure out good conditions to merge on.
+
+So, let's see if we can figure out a better condition. The natural way to do it is to try to maintain some invariant on the stack and merge until that invariant is satisfied.
+
+Further, we want that invariant to maintain the stack as having at most log(n) elements. 
+
+For now, let's consider the following invariant: Each element on the stack has to be >= twice the one popped right before it. So the head is the smallest, the next smallest is the previous and is at least twice as long as the head.
+
+This invariant certainly achieves the log(n) elements criterion. It does however have the tendency to create very long runs of collapses. Consider the case where the lengths of the stack look as follows:
+
+<pre>
+64, 32, 16, 8, 4, 2, 1
+</pre>
+
+Suppose we push a run of length 1 onto the stack. We start the following sequences of merges:
+
+<pre>
+64, 32, 16, 8, 4, 2, 1, 1
+64, 32, 16, 8, 4, 2, 2
+64, 32, 16, 8, 4, 4
+64, 32, 16, 8, 8
+64, 32, 16, 16
+64, 32, 32
+64, 64
+128
+</pre>
+
+Later on, as the merge gets smarter, this will prove to be a bad thing (basically because it stomps on certain structure that might be present in the array). However right now our merges are pretty dumb, so we don't need to worry about it. So we'll simply go with this for now.
+
+One thing worth noting: We now have deterministic guarantees over how big our stack can get. Suppose the first element of the stack is 1. Then the next is >= 2, the next is >= 4, etc. So the total length of segments on the stack is 2^n - 1. Since there can be at most 2^64 elements in the array on a 64-bit machine (and that would be a really alarmingly large array even there), we know that a stack satisfying this invariant can have at most 65 elements. Adding 1 more for the element being pushed, this means we can allocate 66 spaces for the stack and never worry about overflowing.
+
+It's also worth noting that we only need to check whether the element one off the head is >= 2 * the head, because we're always pushing onto a stack satisfying this invariant and a merge only affects the top two elements.
+
+So, in order to satisfy this invariant we simply change should_collapse as follows:
+
+  

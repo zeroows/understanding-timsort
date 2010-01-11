@@ -6,7 +6,7 @@
 // We use a fixed size stack. This size is far larger than there is
 // any reasonable expectation of overflowing. Of course, we do still
 // need to check for overflows.
-#define STACK_SIZE 1024
+#define STACK_SIZE 66
 
 typedef struct {
   int *index;
@@ -92,7 +92,14 @@ int next_partition(sort_state state){
 }
 
 int should_collapse(sort_state state){
-  return (state->stack_height > 2) && ((state->stack_height >= STACK_SIZE) || (rand() % 2));
+  if (state->stack_height <= 2) return 0;
+  
+  int h = state->stack_height - 1;
+
+  int head_length = state->runs[h].length;
+  int next_length = state->runs[h-1].length;
+
+  return 2 * head_length > next_length;
 }
 
 void merge_collapse(sort_state state){
