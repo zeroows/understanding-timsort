@@ -81,7 +81,7 @@ void insertion_sort(int xs[], int length){
     // something <= x, and everything to the right of it has 
     // been moved up one.
     while(j >= 0 && xs[j] > x){
-      xs[j+1], xs[j];
+      xs[j+1] = xs[j];
       j--;
     }    
     xs[j+1] = x;
